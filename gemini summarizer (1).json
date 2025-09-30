@@ -1,0 +1,225 @@
+{
+  "name": "gemini summarizer",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "youtube-summary",
+        "options": {}
+      },
+      "id": "ed6387ab-fc88-4795-a031-6d63f0ee508c",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "position": [
+        224,
+        -32
+      ],
+      "typeVersion": 2.1,
+      "webhookId": "eceb4aac-c2fa-4473-a68b-ce289c64c809"
+    },
+    {
+      "parameters": {
+        "functionCode": "// Try to get the URL from body, query, or directly\nconst url = $json.url || $json.body?.url || $json.query?.url;\n\nif (!url) {\n  throw new Error(\"No YouTube URL found in input\");\n}\n\n// Regex to extract YouTube video ID\nconst match = url.match(/(?:v=|youtu\\.be\\/)([a-zA-Z0-9_-]{11})/);\n\nreturn [{\n  videoId: match ? match[1] : null,\n  originalUrl: url\n}];\n"
+      },
+      "id": "9e6eef7e-d96d-4866-addf-9e48f3c956cd",
+      "name": "Extract Video ID",
+      "type": "n8n-nodes-base.function",
+      "position": [
+        432,
+        -32
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "url": "https://youtubetranscript.com/?server_vid={{$json[\"videoId\"]}}",
+        "options": {}
+      },
+      "id": "6f377305-7fac-4547-a82a-c613c13780c3",
+      "name": "Fetch Transcript",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        624,
+        -32
+      ],
+      "typeVersion": 4.2
+    },
+    {
+      "parameters": {
+        "functionCode": "const inputItem = $input.first();\n// The data from the previous node is an XML string.\nconst xmlData = inputItem.json.data;\n\nlet transcriptText = '';\n\n// Check if the input is a string and looks like the expected XML.\nif (typeof xmlData === 'string' && xmlData.includes('<transcript>')) {\n  \n  // Use a regular expression to find all content inside the <text ...> tags.\n  const regex = /<text[^>]*>([^<]+)<\\/text>/g;\n  const extractedTexts = [];\n  let match;\n\n  // Loop through all matches found by the regex.\n  while ((match = regex.exec(xmlData)) !== null) {\n    // The captured text is in the first group (index 1).\n    // We also decode any XML entities like &amp;\n    const text = match[1].replace(/&amp;/g, '&').replace(/&quot;/g, '\"').replace(/&apos;/g, \"'\").replace(/&lt;/g, '<').replace(/&gt;/g, '>');\n    extractedTexts.push(text);\n  }\n\n  // Join all the extracted text pieces into a single string.\n  if (extractedTexts.length > 0) {\n    transcriptText = extractedTexts.join(' ');\n  }\n}\n\n// If no transcript could be extracted, throw an error.\nif (!transcriptText) {\n  throw new Error(\"Failed to parse transcript from XML response. Check the input from the 'Fetch Transcript' node.\");\n}\n\n// Return the final transcript text for the next node (e.g., the LLM Chain).\nreturn {\n  full_transcript: transcriptText\n};"
+      },
+      "id": "9998623d-3203-42de-a369-96b754e5b6e5",
+      "name": "Chunk Transcript",
+      "type": "n8n-nodes-base.function",
+      "position": [
+        832,
+        -32
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        1056,
+        160
+      ],
+      "id": "40640bf9-911e-469e-b660-bd97fbff9179",
+      "name": "When chat message received",
+      "webhookId": "d37c7fb1-e02b-4a75-9b44-e4e73158ea43"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a helpful assistant that summarizes YouTube transcripts. \nSummarize the following text into concise bullet points:\n\n{{ $json[\"chunk\"] }}\n",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        1024,
+        -32
+      ],
+      "id": "59508676-e984-4bdd-92c9-0994c84523e1",
+      "name": "Basic LLM Chain"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1296,
+        176
+      ],
+      "id": "c32e3a8e-c14d-471b-812a-e807f35eadc9",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "QGgSh56Pm9CjUbg2",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "fromEmail": "pendemajay7@gmail.com",
+        "toEmail": "pendemajay7@gmail.com",
+        "subject": "Youtube video summary",
+        "emailFormat": "text",
+        "text": "={{ $json[\"text\"] }}\n",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        1344,
+        -32
+      ],
+      "id": "ddb9249f-dd40-4695-8187-ccf8b56c62c0",
+      "name": "Send email",
+      "webhookId": "b0651746-f387-4991-9a63-bd73791f6dca",
+      "credentials": {
+        "smtp": {
+          "id": "3C8B0C9LAX6fBYpa",
+          "name": "SMTP account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Video ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Video ID": {
+      "main": [
+        [
+          {
+            "node": "Fetch Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Transcript": {
+      "main": [
+        [
+          {
+            "node": "Chunk Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chunk Transcript": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain": {
+      "main": [
+        [
+          {
+            "node": "Send email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "4de66a17-0974-444b-b597-9fd1138faf49",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ae4123dd2067cd6e465340cb1d8ed6385fc510b9a3235c6f568adcb12fe6fc13"
+  },
+  "id": "kb1B0PooFUvlQKCA",
+  "tags": []
+}
